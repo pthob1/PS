@@ -1,0 +1,316 @@
+<#
+-----------------------------------------------------------------------------
+------------ PowerShell Knowledge Dump from Patricia Hayden ---------------------
+------------- 30 August 2019 - patricia.hayden.0@gmail.com ------------------
+-------- Hopefully I haven't made any typos, but I'm also human :) ----------
+-----------------------------------------------------------------------------
+#>
+
+<#
+---------------------------------------------------
+--------------- POWERSHELL SESSIONS ---------------
+---------------------------------------------------
+#>
+# check what server your connected to - eg ComputerName is dccan100exc01.corp.pbwan.net for OnPrem, or ps.outlook.com for Online, or apbnelyncpool.corp.pbwan.net for Skype
+get-pssession |ft -AutoSize
+# Id Name ComputerName ComputerType State ConfigurationName Availability
+# -- ---- ------------ ------------ ----- ----------------- ------------
+# 1 WinRM1 dccan100exc01.corp.pbwan.net RemoteMachine Opened Microsoft.Exchange Available
+# 2 Session2 ps.outlook.com RemoteMachine Broken microsoft.exchange None
+# 3 Session3 apbnelyncpool.corp.pbwan.net RemoteMachine Broken Microsoft.PowerShell None
+# formatting
+#Output can be formatted using these abbreviations -
+#'fl' for format-list
+#'ft' for format-table, or 'ft -a' for format-table with autosize option (to make the text fit within the width of the console window)
+<#
+-----------------------------------------------------
+------------- EXCHANGE ONLINE SERVER ----------------
+-----------------------------------------------------
+#>
+# Search EOL for any type of mail object that matches criteria (handy if you dont know if something is a shared mailbox or DL or mail contact etc)
+Get-Recipient -Identity "*criteria*" | fl Alias,Identity,RecipientType,RecipientTypeDetails,DisplayName,PrimarySMTPAddress
+Get-Recipient -Identity "*op.wh.*" | fl Alias,Identity,RecipientType,RecipientTypeDetails,DisplayName,PrimarySMTPAddress
+# to find multiple mailboxes based on wildcard searching and view some details in table format
+Get-Recipient -Identity "*nz - whangarei (Bank St)*" -RecipientType UserMailbox | ft identity,alias,RecipientTypeDetails,PrimarySmtpAddress,DisplayName
+
+# =============== Mail Migration =====================
+# check on status of mail migration to EOL - can only be run against a user whose mailbox is currently being migrated
+Get-MoveRequeStstatistics firstname.lastnamewsp.com | fl
+Get-MoveRequest -Identity firstname.lastnamew@wsp.com | fl
+# find out the source server for a user's mail migration - usefull for international transfers, so you can change the migration endpoint to the source server country and their mail should get migrated quicker
+Get-MoveRequestStatistics firstname.lastname@wsp.com | fl SourceServer
+# ------- convert shared mailbox to regular
+# check current type of mailbox 
+Get-Mailbox -Identity firstname.lastname@wsp.com | Format-List RecipientTypeDetails
+# convert current shared mailbox to regular mailbox - this converts the mailbox 'type' setting only, and should take mins rather than hours, but user should not use mailbox from any device during this time
+# eg Thomas.OConnell@wsp.com exists as a shared mailbox but should be a regular user mailbox
+Set-Mailbox -identity firstname.lastname@wsp.com -Type:Regular
+#check mailbox size
+Get-MailboxStatistics Thomas.OConnell@wsp.com | ft displayname, totalitemsize, ItemCount
+# find exchange guid of user 
+Get-Recipient -Identity Jess.Gale@wsponline.mail.onmicrosoft.com | select exchangeguid
+Get-Recipient -Identity ahlia.hicks@wsp.com | fl name,recipienttype,exchangeguid,skuAssigned
+
+# ========= Resource Mailkbox Calendars Timezones ==============
+# check timezone details for calendary alias/email address specified - useful if users complain that calendar appears greyed-out due to having been setup with the wrong timezone
+Get-MailboxCalendarConfiguration -Identity op.wh.mr.tutamoe@wsp.com | fl identity,WorkDays,WorkingHoursStartTime,WorkingHoursEndTime,WorkingHoursTimeZone,WeekStartDay
+# set timezone to NZ for calendar alias/identity specified - so that calendar greyed-out areas are outside of bau hours
+Set-MailboxCalendarConfiguration -Identity op.wh.mr.tutamoe@wsp.com -WorkingHoursTimeZone "New Zealand Standard Time"
+
+# ================ Email Forwarding ==================
+# to check email forwardings ( as may not always be shown/visible in EOL Console Website) in case of delivery failures or mail loops
+Get-Mailbox firstname.lastname@wsp.com | FL DeliverToMailboxAndForward,ForwardingAddress,ForwardingSmtpAddress
+# Disabled User forwarding in O365
+Set-Mailbox firstname.lastname@wsp.com -ForwardingSmtpAddress $null 
+# From Google - Powershell mail forwarding commans - https://o365info.com/forward-mail-powershell-commands-quick/
+#Disable (cancel) ADMIN Forwarding (ForwardingAddress) Specific MAILBOX (internal)
+Set-Mailbox <MailBox> -ForwardingAddress $Null
+#Disable (cancel) USER Forwarding (ForwardingsmtpAddress) Specific MAILBOX (external)
+Set-Mailbox <MailBox> -ForwardingSmtpAddress $Null
+# From Google - About email forwarding options - https://blogs.technet.microsoft.com/timmcmic/2015/06/08/exchange-and-office-365-mail-forwarding-2/
+# Find anyone with email forwarding setup - doesnt currently work, may be issue with OU spelling?
+Get-Mailbox patricia.hayden@wsp.com -OrganizationalUnit 'ou=NZ,OU=DirSync,OU=Opus,OU=Integrations,DC=corp,DC=pbwan,DC=net' -ResultSize 200 | where($_.ForwardingSmtpAddress -ne $null) | select UserPrincipalName,ForwardingAddress,ForwardingSmtpAddress,DeliverToMailboxAndForward | Export-Csv -Path C:\Users\NZPXH001IT5\Documents\ForwardingAdddress_5.csv -NoTypeInformation
+# eg OU corp.pbwan.net/Integrations/Opus/DirSync/NZ/NR/Users/AU
+
+# ============ Mailbox/Resource Permissions =====================
+# check calendar folder permissions (or show permssions for a given folder of the mailbox eg calendar, inbox etc)
+Get-MailboxFolderPermission affected_calendar@wsp.com:\Calendar
+# set calendar folder permissions eg EA wants Editor access to manager's calendar
+Set-MailboxFolderPermission -Identity affected_calendar@wsp.com:\Calendar -User user_who_wants_access@wsp.com -AccessRights Editor
+# remove calendar (or other) folder permissions
+Remove-MailboxFolderPermission op.wh.p1@wsp.com:\calendar -User patricia.hayden@wsp.com 
+# show permissions for the entire mailbox itself (will give different info to above Get-MailboxFolderPermission command)
+Get-MailboxPermission -Identity op.wh.p1@wsp.com | ft -AutoSize
+# for differences between these commands - https://practical365.com/exchange-online/mailbox-permissions-vs-mailbox-folder-permissions/
+# Use the Set-CalendarProcessing cmdlet to modify calendar processing options for resource mailboxes, which include the Calendar Attendant, resource booking assistant, and calendar configuration. Note that this cmdlet is effective only on resource mailboxes.
+# check calendar resource delegate info for resource mailbox
+Get-Calendarprocessing op.wh.p1@wsp.com | ft ResourceDelegates
+# remove all degegates from a certain calendar
+Set-CalendarProcessing -Identity James.Thompson2@wsp.com -ResourceDelegates $null
+# set delegates to be a list of userss
+Set-CalendarProcessing -Identity <identity> -ResourceDelegates <comma separated list of identities>
+# to check moderation on a DL, if set
+get-DistributionGroup nztransportau@wsp.com | fl *moder* 
+# See also Google (however code will search all AD, so less ideal for international companies - https://www.michev.info/Blog/Post/1516/quickly-list-all-mailboxes-to-which-a-particular-user-has-access
+
+# ==================== Mail box Auto Mapping Issue ========================
+<# usefull if users complain about mailboxes still being visible in their outlook client, despite delegation being removed in EMC
+see also - 
+https://serverfault.com/questions/543559/script-to-remove-exchange-2010-automapping-for-all-mailboxes
+https://www.petri.com/disable-outlook-auto-mapping-for-users-with-full-access-permissions
+#>
+# check mailbox permissions to see what users have access - theres no option/no command to check the current value of AutoMapping, so it needs to be removed & readded in order to know its value
+Get-MailboxPermission -Identity op.wh.p1@wsp.com | ft -AutoSize
+# remove mailbox permissions 
+Remove-MailboxPermission -Identity op.wh.p1@wsp.com -User patricia.hayden@wsp.com -AccessRights FullAccess 
+# readd mailbox permissions, setting automapping to false - theres no option/no command to check the current value of AutoMapping, so it needs to be removed & readded in order to know its value
+Add-MailboxPermission -Identity op.wh.p1@wsp.com -User patricia.hayden@wsp.com -AccessRights FullAccess -AutoMapping:$false
+
+# -------- Bigger script RemoveAutoMappingFromMailboxes for Mailbox Automapping -----------
+# bigger script to add mailbox permissions with automapping=false, then remove permissions, for a set array of mailbox IDs and a set arrray of users email addresses
+# adjust script for the mailboxes and users you need to modify - script is rather verbose, and assumes users no longer want access to the mailboxes
+Write-Host "`n`n New Script Running - RemoveAutoMappingFromMailboxes"
+$array_MboxIDs = @('op.wh.p1@wsp.com', 'op.wh.p2@wsp.com', 'op1.wh.hcm605', 'op1.wh.hsm378', 'op1.wh.hlj995', 'op1.wh.hbg160')
+$array_UsersEmail = @('karen.a.morrison@wsp.com', 'kerryann.rodger@wsp.com', 'sonya.cuff@wsp.com', 'Yvonne.Dunn@wsp.com', 'Sianne.Little@wsp.com')
+Write-Host "Found $($array_MboxIDs.length) mailboxes in array"
+Write-Host "Found $($array_UsersEmail.length) users in array"
+# Iterate over each mailbox in mailbox array
+foreach($MailboxID in $array_MboxIDs)
+{
+try 
+{
+Read-Host -Prompt "`n Press Enter to continue to next mailbox.."
+# check current permissions
+Write-Host "`n `n ...ALL permissions for CURRENT mailbox: $MailboxID "
+Get-MailboxPermission -Identity $MailboxID | ft -autosize
+Write-Host "`n `n CURRENT Permissions for mailboxs: $MailboxID "
+Write-Host "`n Getting mailbox permissions for FullAccess only.... "
+Get-MailboxPermission $MailboxID | where {$_.AccessRights -eq "FullAccess" -and $_.IsInherited -eq $false}
+# iterate over each user in user array
+foreach($EmailID in $array_UsersEmail)
+{
+$tempUser = Get-ADUser -Filter {EmailAddress -eq $EmailID}
+Write-Host "`n Current User is $($tempUser.samaccountname) with UPN $($tempUser.UserPrincipalName) "
+try {
+# add permissions with automap flag = false
+Add-MailboxPermission -Identity $MailboxID -User $tempUser -AccessRights:FullAccess -AutoMapping $false
+Write-Host "Adding Mbox Permissions with automapping false, for resource_id $($MailboxID) and user UPN $($tempUser.UserPrincipalName) "
+# remove permissions as users dont want mailbox
+Remove-MailboxPermission -Identity $MailboxID -User $tempUser -AccessRights:FullAccess 
+Write-Host "Removing Mbox Permissions for resource_id $MailboxID and user UPN $($tempUser.UserPrincipalName) "
+}
+catch {
+Write-Host "Encountered error: $($Error[0].Exception) on mailbox $($MailboxID.DisplayName) with SMTP $($MailboxID.PrimarySmtpAddress) " -ForegroundColor Red
+}
+} # end of for-each-user
+# finished with current mailbox - but you wont see any permission changes shown here if you already removed the permissions!
+Write-Host "`n `n UPDATED Permissions for mailboxs (after add & remove) : $MailboxID "
+Get-MailboxPermission -Identity $MailboxID | ft -autosize
+}
+catch
+{
+# Inform about the error if unsuccessful
+Write-Host "Encountered error: $($Error[0].Exception) on mailbox $($MailboxID.DisplayName) with SMTP $($MailboxID.PrimarySmtpAddress) " -ForegroundColor Red
+} 
+} # end of for-each-mailbox
+# ----- end of RemoveAutoMappingFromMailboxes ------------
+
+# =========== Change Default User to have Reviewer Access for Multiple Calendars ============
+#final script to find all mailbox calendars based on display name, and changed Default user to have Reviewer access
+#improvement for next time - prompt user for display name to search for
+$MailboxArray = Get-Mailbox -Identity "NZ - Tauranga ‎(Cameron Rd)‎ -*"| select Identity
+ForEach ($Mailbox in $MailboxArray) {
+write-host "`nCalendar Permissions for: " $Mailbox.Identity 
+Get-MailboxFolderPermission -identity ($Mailbox.Identity + ":\calendar") -User Default | ft foldername,user,AccessRights 
+write-host "About to change calendar permissions... " # uncomment line below!
+#Set-MailboxFolderPermission -Identity ($Mailbox.Identity + ":\calendar") -User Default -AccessRights Reviewer
+write-host "Calendar Permissions after changing Default user to have Reviewer permissions "
+Get-MailboxFolderPermission -identity ($Mailbox.Identity + ":\calendar") -User Default | select identity,foldername,user,AccessRights
+}
+
+# =========== Change Calendar Timezones for Multiple Calendars ============
+#script to find multiple resource calendars and change timezone to NZ
+Write-Host "Enter search string to find mailboxes: eg 'NZ - Tauranga ‎(Cameron Rd)‎ -' " -ForegroundColor Yellow
+$search_string = Read-Host
+$MailCalendarArray = Get-Mailbox -Identity ($search_string + "*") | select Identity,displayname
+
+#Write-Host $MailCalendarArray | ft identity
+ForEach ($Calendar in $MailCalendarArray) {
+# write out mailbox first
+Get-MailboxCalendarConfiguration -Identity $Calendar.Identity| ft identity,displayname,WorkingHoursTimeZone,WeekStartDay,WorkingHoursStartTime,WorkingHoursEndTime
+write-host "About to change calendar timezones... "
+
+# set timezone to NZ for calendar alias/identity specified - uncomment line below!
+#Set-MailboxCalendarConfiguration -Identity $Calendar.Identity -WorkingHoursTimeZone "New Zealand Standard Time"
+write-host "Calendar Config after Timezone change"
+Get-MailboxCalendarConfiguration -Identity $Calendar.Identity| ft identity,displayname,WorkingHoursTimeZone,WeekStartDay,WorkingHoursStartTime,WorkingHoursEndTime
+}
+
+
+# ============== Skype users and msRTCSIP-OriginatorSid ==============
+# Find Skype users who cant login as they have a SID value set in AD for EA named msRTCSIP-OriginatorSid (adjust OU to search as required)
+Get-ADUser -SearchBase "ou=ha, ou=users, ou=cr, ou=nz, ou=dirsync, ou=opus, ou=integrations, dc=corp,dc=pbwan,dc=net" -filter * -Properties * | ? {$_."msRTCSIP-OriginatorSid" -ne $null} | Select-Object identity,SamAccountName,msRTCSIP-OriginatorSid | measure
+# count number of Expired accounts where EA msRTCSIP-OriginatorSid is not null ie it has a value & thus users wont be able to login to skype as expected if they return to work at WSP-Opus and are moved out of the Expired OU. Remove 'measure' to see the accounts themselves
+# checked Expired OU on 18 July 2019, found 83 null and 294 not-null for EA msRTCSIP-OriginatorSid 
+Get-ADUser -SearchBase "ou=nz, ou=_ExpiredUserAccounts, ou=opus, ou=integrations, dc=corp,dc=pbwan,dc=net" -filter * -Properties * | ? {$_."msRTCSIP-OriginatorSid" -ne $null} | Select-Object identity,SamAccountName,msRTCSIP-OriginatorSid | measure
+
+<#
+----------------------------------------------------------
+--------------- EXCHANGE ON-PREM SERVER ------------------
+----------------------------------------------------------
+#>
+
+# ---- Universal Messaging (voicemail in exchange)
+#to check exisng values for user - will fail if user hasnt been setup yet
+Get-UMMailbox -Identity firstname.lastname@wsp.com | select UMEnabled, Extensions, UMMailboxPolicy,PrimarySMTPAddress
+#UMEnable user in Exchagne 
+Enable-UMMailbox -Identity userprincipalname -UMMailboxPolicy "DialPlan-NZ Default Policy" -Extensions 8DigitTelephoneNumber -PinExpired $true 
+# if DDI is already assigned to another user, remove it with this (needs -KeepProperties=$False option to free up DDI)
+Disable-UMMailbox -Identity userprincipalname -KeepProperties $False
+
+<# 
+----------------------------------------------------------
+---------------------SKYPE SERVER ------------------------
+----------------------------------------------------------
+#>
+
+# check current setup for user - search using their alias or sip address
+Get-CsUser -Identity firstname.lastname@wsp.com
+#grant voicemail policy 
+Grant-CSHostedVoicemailPolicy -policyname O365UM -identity firstname.lastname@wsp.com
+# setup hosted VM - will only work if user has been UMEnabled in EOL first
+Set-CsUser -HostedVoiceMail $True -Identity firstname.lastname@wsp.com
+# doesnt work
+(Get-MsolUser -UserPrincipalName jess.gale@wsp.com).errors.errordetail.objecterrors.errorrecord| fl
+# Find existing user with a certain DDI in skype (command will take some time to run) - useful if you try to assign a DDI to someone but get an eror about it being in use by another person
+Get-CsUser | where {$_.LineURI -eq "tel:+6494147621" -or $_.PrivateLine -eq “tel:+6494147621"} | ft Displayname, LineURI, SipUri
+
+# ----- creating/removing/enabling users in skype -----
+# to remove user account from skype and lose/forget all settings 
+Disable-CsUser -Identity arya.stark@wsp.com 
+Disable-CsUser -Verbose # will disable all user found, if piped to this cmd
+# NB: After Disable-CsUser has run there is no way to re-enable the account and its previous settings. Instead, you will need to use the Enable-CsUser cmdlet to create a brand-new account for the user.
+#To temporarily disable a user account, set the value of the Enabled property to False ($False). / To re-enable a disabled user account, set the value of the Enabled property to True ($True).
+Set-CsUser -Identity arya.stark@wsp.com -Enabled $False
+Set-CsUser -Enabled $False # try piping all disbled AD users to this, to temp disable them
+# Per Google (although I found AD-disabled Skype-enabled users cannot login when i tested - 
+# Simply disabling a user account in Active Directory will not stop a user from being able to sign into or use Lync Server. This is because Lync uses certificate authentication that streamlines the authentication process, and these client certificates are valid for 180 days. If you want to stop disabled Active Directory accounts that had been enabled for Lync from having access to Lync Server, you must use the Disable-CsUser cmdlet, or use the Lync Server Control Panel as laid out in this article. Once the user is disabled in Lync and the Central Management store has been replicated in the environment the users will no longer be able to sign in. Also, users that are signed in will get disconnected.
+# Find Disabled Active Directory Accounts Who are Still Lync Enabled - Credit: http://www.ehloworld.com/265
+# count users - fyi will exclude users who have left Opus, but have not been disabled in AD, as no leaving process eg LY. Need need to check the right OU, Expired is 162 users, Opus DirSync is 10 at 29 Aug 2019
+Get-CsAdUser -OU "OU=NZ,OU=_ExpiredUserAccounts,OU=Opus,OU=Integrations,DC=corp,DC=pbwan,DC=net" | Where-Object {$_.UserAccountControl -match "AccountDisabled" -and $_.Enabled} | Measure-Object
+# find users and export to csv
+Get-CsAdUser -OU "OU=NZ,OU=_ExpiredUserAccounts,OU=Opus,OU=Integrations,DC=corp,DC=pbwan,DC=net" | Where-Object {$_.UserAccountControl -match "AccountDisabled" -and $_.Enabled} | select Name,SAMAccountName,UserAccountControl,Enabled,SipAddress,office | Export-Csv -Path C:\Users\NZPXH001IT5\Documents\SkypeSetup\ADExpired_SkypeEnabled.csv -NoTypeInformation
+# And, if you want, can disable them in one line using - Needs testing, and a bit of caution to run, needs to target relevant OU as will disable every user that matches criteria
+#Get-CsAdUser -OU "OU=NZ,OU=_ExpiredUserAccounts,OU=Opus,OU=Integrations,DC=corp,DC=pbwan,DC=net" | Where-Object {$_.UserAccountControl -match "AccountDisabled" -and $_.Enabled} | Disable-CsUser -Verbose
+
+# --------- SetupSkypeUsersPCOption - Bulk creating of skype users based on input csv file, with column UserPrincipalName ---------
+# needs a bit of work to get logfile working, instead of outputting to console
+#create output log file
+$LogFile = "TestEnable-SkyeUsers-Log-"+(get-date -uformat %d%m%Y-%H%M%S)+".txt"
+$LogTXT = "Processing Users.....`n"
+Out-File -FilePath $LogFile -InputObject $LogTXT
+# read input file of new user to setup with basic skype
+$SkypeUsersArray = Import-CSV C:\Users\NZPXH001IT5\Documents\SkypeSetup\NewSkypeUsers.csv 
+# for each user, get details, enable and set details
+ForEach ($newUserUPN in $SkypeUsersArray) { 
+$user_UPN = get-csaduser $newUserUPN.UserPrincipalName
+Write-host "`nSkype query for SamAccount: " $user_UPN.SamAccountName ", DisplayName" $user_UPN.DisplayName 
+#$LogTXT = "Successfully writing $user_UPN.DisplayName for Lync Server 2010"
+#Out-File -FilePath $LogFile -InputObject $LogTXT
+If ($user_UPN.Enabled -eq $null) {
+Write-Host "Enabled is null so Do Enable!" 
+Write-Host "about to run enable-csuser..."
+Enable-CsUser -identity $user_UPN.UserPrincipalName -RegistrarPool "apbnelyncpool.corp.pbwan.net" -SipAddressType UserPrincipalName
+Write-Host "about to run set-csuser..." # this now works, tho warns its not changing aything
+#$LogTXT = "Successfully enabled $newUserUPN for Lync Server 2010"
+Set-CsUser -identity $user_UPN.UserPrincipalName –AudioVideoDisabled $False –EnterpriseVoiceEnabled $False –RemoteCallControlTelephonyEnabled $False 
+Write-Host "about to run get-csuser..."
+Get-CsUser –Identity $user_UPN.Identity | ft UserPrincipalName,SipAddress,Enabled,VoicePolicy,RegistrarPool,DialPlan,AudioVideoDisabled,RemoteCallControlTelephonyEnabled,EnterpriseVoiceEnabled
+}
+# User has skype account but is not enabled 
+elseif($user_UPN.Enabled -eq $false) {
+#Set-CsUser –Identity $username –Enabled $True -DomainController $targetdc 
+Get-CsUser –Identity $user_UPN 
+Write-Host "EnaABLED IS FALSE"
+}
+# User has enabled skype account
+elseif($user_UPN.Enabled -eq $true) {
+#Set-CsUser –Identity $username –Enabled $True -DomainController $targetdc 
+Get-CsUser –Identity $user_UPN.Identity | ft SipAddress,RegistrarPool
+Write-Host "Enabled is TRUE"
+}
+} 
+# end of bigger script SetupSkypeUsersPCOption
+
+
+<#
+----------------------------------------------------------
+---------------------- BITLOCKER ------------------------
+----------------------------------------------------------
+#>
+# manage-bde (bitlocker-device-encryption) commands can be run from powershell or dos prompt - no need to connect to any server
+# check status, if bitlocker is on/off for remote pc 
+manage-bde -status -computername DUPC132 C:
+# get bitlocker key (if set) for remote pc
+manage-bde -protectors -computername DUPC132 C: -get
+# get all key protector info - but only for current pc & drive specified
+(Get-BitLockerVolume -MountPoint C).KeyProtector
+# get recovery password - but only for current pc & drive specified
+((Get-BitLockerVolume -MountPoint C).KeyProtector).RecoveryPassword
+# Export the BitLocker recovery keys for all drives of current pc and display them at the Command Prompt.
+$BitlockerVolumers = Get-BitLockerVolume
+$BitlockerVolumers |
+ForEach-Object {
+$MountPoint = $_.MountPoint
+$RecoveryKey = [string]($_.KeyProtector).RecoveryPassword
+if ($RecoveryKey.Length -gt 5) {
+Write-Output ("The drive $MountPoint has a BitLocker recovery key $RecoveryKey.")
+}
+}
+
+
+# Update Skype user to give delegation to another to send Skype meeting on behlaf of
+Add-MailboxFolderPermission -Identity "David Dunlop:\calendar" -User Tessa.Facey@wsp.com -AccessRights editor -SharingPermissionFlags delegate
+
+Add-MailboxFolderPermission -Identity "Recipientsname:\calendar" -User username@wsp.com -AccessRights editor -SharingPermissionFlags delegate
+# ie Add-MailboxFolderPermission -Identity "Peter Wiles:\
